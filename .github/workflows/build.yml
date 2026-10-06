@@ -171,6 +171,14 @@ jobs:
       - name: Remove the update feed
         run: patches/strip-sparkle.sh src
 
+      # --check first so a patch that no longer applies after an upstream bump
+      # fails here, before anything in src changes.
+      - name: Apply the live-preview patch
+        run: |
+          patch="$GITHUB_WORKSPACE/patches/live-preview.patch"
+          git -C src apply --check "$patch"
+          git -C src apply "$patch"
+
       - name: Import the signing identity
         env:
           P12_BASE64: ${{ secrets.VOICEINK_SIGNING_P12 }}
@@ -293,8 +301,10 @@ jobs:
         run: |
           notes="$RUNNER_TEMP/notes.md"
           {
-            echo "Unofficial build of VoiceInk ${VOICEINK_TAG#v} with update checks removed, signed with the"
-            echo "self-signed \"$SIGNING_IDENTITY\" certificate (SHA-1 $VOICEINK_CERT_SHA1) and not notarized."
+            echo "Unofficial build of VoiceInk ${VOICEINK_TAG#v} with update checks removed and the changes in"
+            echo "patches/live-preview.patch (a live preview for custom models, whose text is pasted unfiltered),"
+            echo "signed with the self-signed \"$SIGNING_IDENTITY\" certificate (SHA-1 $VOICEINK_CERT_SHA1) and"
+            echo "not notarized."
             echo "The official app is at https://github.com/Beingpax/VoiceInk."
             echo
             echo "Source:"

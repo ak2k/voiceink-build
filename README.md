@@ -13,6 +13,19 @@ The official app, with automatic updates, is available from
 - Update checks are removed. `patches/strip-sparkle.sh` deletes the Sparkle
   update feed (`SUFeedURL`) from the source before the build, so the app never
   offers to replace itself with the official build.
+- Custom transcription models can show a live preview. `patches/live-preview.patch`
+  lets a custom model use the mode's "Real-time" toggle: while you speak, the
+  recorder shows words from xAI's streaming API, using the xAI API key entered in
+  VoiceInk's settings. When you stop, the stream is dropped and the recording is
+  sent to the custom model's endpoint as before, so the pasted text never comes
+  from the stream. If the stream cannot start (for example, with no xAI key) or
+  fails, the paste is unaffected. The preview uses VoiceInk's dictionary words,
+  so its spellings can differ from the paste. The toggle is on for a new mode and
+  turns on when you pick a model in a mode's settings; a mode saved with it off
+  keeps it off.
+- Text from a custom model is pasted without VoiceInk's output filter, which
+  deletes filler words such as "mm" and "hm" and anything in brackets or
+  parentheses, so "5 mm" and "(the old one)" survive.
 - It is signed with a self-signed certificate, "VoiceInk Local", instead of an
   Apple Developer ID, and it is not notarized. The workflow signs with that one
   certificate each time, and macOS ties permissions such as Microphone and Accessibility
@@ -26,7 +39,8 @@ input changes on `main`, or when started by hand. It:
 
 1. checks out VoiceInk and whisper.cpp at the commits pinned in `upstream.env`,
    and uses the Xcode version pinned there;
-2. removes the update feed;
+2. removes the update feed and applies `patches/live-preview.patch`, failing if
+   the patch no longer applies;
 3. runs `make local`, signing with the certificate held in a repository secret;
 4. checks the signature, the designated requirement, the entitlements, the
    version, and that the update feed is gone (`scripts/verify-app.sh`);
@@ -43,6 +57,7 @@ To build the same way on a Mac with Xcode and your own code-signing identity:
 git clone https://github.com/Beingpax/VoiceInk.git && cd VoiceInk
 git checkout <VOICEINK_REV from upstream.env>
 /path/to/voiceink-build/patches/strip-sparkle.sh .
+git apply /path/to/voiceink-build/patches/live-preview.patch
 XCODE_XCCONFIG_FILE=/path/to/voiceink-build/sign.xcconfig \
   make local LOCAL_CODESIGN_IDENTITY="VoiceInk Local"
 ```
