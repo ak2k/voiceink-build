@@ -1,0 +1,58 @@
+# voiceink-build
+
+An unofficial build of [VoiceInk](https://github.com/Beingpax/VoiceInk), a macOS
+dictation app licensed under GPL-3.0. It is built from upstream source for the
+owner's Macs and is not affiliated with or supported by the VoiceInk project.
+The official app, with automatic updates, is available from
+[upstream](https://github.com/Beingpax/VoiceInk).
+
+## How it differs from the official app
+
+- It is built with upstream's `make local` target, which upstream provides for
+  building the app yourself.
+- Update checks are removed. `patches/strip-sparkle.sh` deletes the Sparkle
+  update feed (`SUFeedURL`) from the source before the build, so the app never
+  offers to replace itself with the official build.
+- It is signed with a self-signed certificate, "VoiceInk Local", instead of an
+  Apple Developer ID, and it is not notarized. Every build uses the same
+  certificate, and macOS ties permissions such as Microphone and Accessibility
+  to it, so the permissions carry over to new builds. The certificate's SHA-1
+  is in `signing.env`.
+
+## How it is built
+
+`.github/workflows/build.yml` runs on a GitHub-hosted macOS runner when a build
+input changes on `main`, or when started by hand. It:
+
+1. checks out VoiceInk and whisper.cpp at the commits pinned in `upstream.env`,
+   and uses the Xcode version pinned there;
+2. removes the update feed;
+3. runs `make local`, signing with the certificate held in a repository secret;
+4. checks the signature, the designated requirement, the entitlements, the
+   version, and that the update feed is gone (`scripts/verify-app.sh`);
+5. publishes `VoiceInk-<version>-r<N>.tar.xz` as a release and records its URL
+   and SHA-256 in `dist/release.json`.
+
+`.github/workflows/upstream-check.yml` runs weekly and opens an issue when
+upstream has a newer stable release. Moving to it is a manual edit of
+`upstream.env`.
+
+To build the same way on a Mac with Xcode and your own code-signing identity:
+
+```sh
+git clone https://github.com/Beingpax/VoiceInk.git && cd VoiceInk
+git checkout <VOICEINK_REV from upstream.env>
+/path/to/voiceink-build/patches/strip-sparkle.sh .
+XCODE_XCCONFIG_FILE=/path/to/voiceink-build/sign.xcconfig \
+  make local LOCAL_CODESIGN_IDENTITY="VoiceInk Local"
+```
+
+Change `CODE_SIGN_IDENTITY` in `sign.xcconfig` if your identity has another
+name. `make local` clones the latest whisper.cpp into `~/VoiceInk-Dependencies`
+unless a build is already there; the workflow builds the pinned release there
+first. The app is written to `~/Downloads/VoiceInk.app`.
+
+## License
+
+The scripts and workflows here are licensed under GPL-3.0, the same license as
+VoiceInk; see `LICENSE`. VoiceInk itself is the work of its authors.

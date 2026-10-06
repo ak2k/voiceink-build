@@ -1,0 +1,4 @@
+// Passed to xcodebuild through XCODE_XCCONFIG_FILE. That file outranks the
+// `-xcconfig LocalBuild.xcconfig` that `make local` passes, whose
+// `CODE_SIGN_IDENTITY = -` would otherwise force ad-hoc signing.
+CODE_SIGN_IDENTITY = VoiceInk Local
