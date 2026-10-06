@@ -14,8 +14,8 @@ The official app, with automatic updates, is available from
   update feed (`SUFeedURL`) from the source before the build, so the app never
   offers to replace itself with the official build.
 - It is signed with a self-signed certificate, "VoiceInk Local", instead of an
-  Apple Developer ID, and it is not notarized. Every build uses the same
-  certificate, and macOS ties permissions such as Microphone and Accessibility
+  Apple Developer ID, and it is not notarized. The workflow signs with that one
+  certificate each time, and macOS ties permissions such as Microphone and Accessibility
   to it, so the permissions carry over to new builds. The certificate's SHA-1
   is in `signing.env`.
 
