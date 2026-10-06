@@ -1,0 +1,107 @@
+diff --git a/VoiceInk/Features/AudioImport/Workflows/AudioFileTranscriptionManager.swift b/VoiceInk/Features/AudioImport/Workflows/AudioFileTranscriptionManager.swift
+index 77b8b12..f1bf3fd 100644
+--- a/VoiceInk/Features/AudioImport/Workflows/AudioFileTranscriptionManager.swift
++++ b/VoiceInk/Features/AudioImport/Workflows/AudioFileTranscriptionManager.swift
+@@ -177,7 +177,7 @@ class AudioTranscriptionManager: ObservableObject {
+                 context: transcriptionConfiguration.requestContext
+             )
+             let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
+-            text = TranscriptionOutputFilter.filter(text)
++            if currentModel.provider != .custom { text = TranscriptionOutputFilter.filter(text) }
+             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+ 
+             let modeMetadata = transcriptionConfiguration.metadata
+diff --git a/VoiceInk/Features/History/Workflows/AudioFileTranscriptionService.swift b/VoiceInk/Features/History/Workflows/AudioFileTranscriptionService.swift
+index d155567..271ee94 100644
+--- a/VoiceInk/Features/History/Workflows/AudioFileTranscriptionService.swift
++++ b/VoiceInk/Features/History/Workflows/AudioFileTranscriptionService.swift
+@@ -71,7 +71,7 @@ class AudioTranscriptionService: ObservableObject {
+             let transcriptionStart = Date()
+             var text = try await serviceRegistry.transcribe(audioURL: url, model: model, context: requestContext)
+             let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
+-            text = TranscriptionOutputFilter.filter(text)
++            if model.provider != .custom { text = TranscriptionOutputFilter.filter(text) }
+             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+             let formattingConfiguration = ModeRuntimeResolver.transcriptionFormattingConfiguration(mode: mode)
+ 
+diff --git a/VoiceInk/Features/ModelLibrary/Models/TranscriptionModel.swift b/VoiceInk/Features/ModelLibrary/Models/TranscriptionModel.swift
+index 191a010..9ebc313 100644
+--- a/VoiceInk/Features/ModelLibrary/Models/TranscriptionModel.swift
++++ b/VoiceInk/Features/ModelLibrary/Models/TranscriptionModel.swift
+@@ -172,6 +172,9 @@ struct CustomCloudModel: TranscriptionModel, Codable {
+     let isMultilingualModel: Bool
+     let supportedLanguages: [String: String]
+ 
++    /// Streams a live preview through xAI; the paste still comes from the batch endpoint.
++    var supportsStreaming: Bool { true }
++
+     /// API key retrieved from Keychain by model ID.
+     var apiKey: String {
+         APIKeyManager.shared.getCustomModelAPIKey(forModelId: id) ?? ""
+diff --git a/VoiceInk/Features/Recording/Streaming/StreamingTranscriptionService.swift b/VoiceInk/Features/Recording/Streaming/StreamingTranscriptionService.swift
+index 2351c0a..02212a8 100644
+--- a/VoiceInk/Features/Recording/Streaming/StreamingTranscriptionService.swift
++++ b/VoiceInk/Features/Recording/Streaming/StreamingTranscriptionService.swift
+@@ -314,6 +314,9 @@ class StreamingTranscriptionService {
+             }
+             return FluidAudioStreamingProvider(fluidAudioService: fluidAudioService)
+         }
++        if model.provider == .custom {
++            return CustomLivePreviewProvider(modelContext: modelContext)
++        }
+         guard let cloudProvider = CloudProviderRegistry.provider(for: model.provider),
+             let streamingProvider = cloudProvider.makeStreamingProvider(modelContext: modelContext)
+         else {
+diff --git a/VoiceInk/Features/Recording/Workflows/TranscriptionPipeline.swift b/VoiceInk/Features/Recording/Workflows/TranscriptionPipeline.swift
+index 9729654..d476cd3 100644
+--- a/VoiceInk/Features/Recording/Workflows/TranscriptionPipeline.swift
++++ b/VoiceInk/Features/Recording/Workflows/TranscriptionPipeline.swift
+@@ -111,7 +111,7 @@ class TranscriptionPipeline {
+                     context: transcriptionConfiguration.requestContext
+                 )
+             }
+-            text = TranscriptionOutputFilter.filter(text)
++            if model.provider != .custom { text = TranscriptionOutputFilter.filter(text) }
+             let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
+ 
+             if shouldCancel() {
+diff --git a/VoiceInk/Infrastructure/Providers/Transcription/Cloud/Streaming/CustomLivePreviewProvider.swift b/VoiceInk/Infrastructure/Providers/Transcription/Cloud/Streaming/CustomLivePreviewProvider.swift
+new file mode 100644
+index 0000000..5c542b5
+--- /dev/null
++++ b/VoiceInk/Infrastructure/Providers/Transcription/Cloud/Streaming/CustomLivePreviewProvider.swift
+@@ -0,0 +1,34 @@
++import Foundation
++import SwiftData
++
++/// Live preview for custom models: xAI's stream fills the recorder's partial text, and stop
++/// requests batch fallback so the pasted text comes from the custom endpoint alone.
++final class CustomLivePreviewProvider: StreamingTranscriptionProvider {
++
++    private let preview: XAIStreamingProvider
++
++    var stopDisposition: StreamingStopDisposition { .useBatchFallback }
++
++    var transcriptionEvents: AsyncStream<StreamingTranscriptionEvent> { preview.transcriptionEvents }
++
++    init(modelContext: ModelContext) {
++        preview = XAIStreamingProvider(modelContext: modelContext)
++    }
++
++    func connect(model: any TranscriptionModel, language: String?) async throws {
++        // LLMkit's xAI stream sends no model name, so the custom model passes through as is.
++        try await preview.connect(model: model, language: language)
++    }
++
++    func sendAudioChunk(_ data: Data) async throws {
++        try await preview.sendAudioChunk(data)
++    }
++
++    func commit() async throws {
++        try await preview.commit()
++    }
++
++    func disconnect() async {
++        await preview.disconnect()
++    }
++}
