@@ -303,7 +303,8 @@ jobs:
           notes="$RUNNER_TEMP/notes.md"
           {
             echo "Unofficial build of VoiceInk ${VOICEINK_TAG#v} with update checks removed and the changes in"
-            echo "patches/live-preview.patch (a live preview for custom models, whose text is pasted unfiltered),"
+            echo "patches/live-preview.patch: custom models can show a live preview, which is display only, and"
+            echo "the pasted text is the custom model's batch result without VoiceInk's output filter. It is"
             echo "signed with the self-signed \"$SIGNING_IDENTITY\" certificate (SHA-1 $VOICEINK_CERT_SHA1) and"
             echo "not notarized."
             echo "The official app is at https://github.com/Beingpax/VoiceInk."

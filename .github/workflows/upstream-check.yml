@@ -65,6 +65,9 @@ jobs:
             echo "   is already ${latest#v}; otherwise use upstream's later version-bump commit."
             echo "2. Check whether \`XCODE_VERSION\`, \`XCODE_BUILD\` or the whisper.cpp pin should move"
             echo "   (the \`DTXcodeBuild\` key in the official app's Info.plist names upstream's Xcode)."
+            echo "3. Run \`git apply --check patches/live-preview.patch\` in a VoiceInk checkout at the new"
+            echo "   \`VOICEINK_REV\`. If it fails, update the patch for the new source before pushing; the"
+            echo "   build fails while the patch does not apply."
             echo
             echo "Release: https://github.com/Beingpax/VoiceInk/releases/tag/$latest"
             echo "Changes: https://github.com/Beingpax/VoiceInk/compare/$current...$latest"

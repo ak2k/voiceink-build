@@ -15,14 +15,16 @@ The official app, with automatic updates, is available from
   offers to replace itself with the official build.
 - Custom transcription models can show a live preview. `patches/live-preview.patch`
   lets a custom model use the mode's "Real-time" toggle: while you speak, the
-  recorder shows words from xAI's streaming API, using the xAI API key entered in
-  VoiceInk's settings. When you stop, the stream is dropped and the recording is
-  sent to the custom model's endpoint as before, so the pasted text never comes
-  from the stream. If the stream cannot start (for example, with no xAI key) or
-  fails, the paste is unaffected. The preview uses VoiceInk's dictionary words,
-  so its spellings can differ from the paste. The toggle is on for a new mode and
-  turns on when you pick a model in a mode's settings; a mode saved with it off
-  keeps it off.
+  recorder shows words from xAI's streaming API. While the toggle is on and an
+  xAI API key is entered in VoiceInk's settings, the recorded audio is also
+  streamed to xAI under that key. When you stop, the stream is dropped and the
+  recording is sent to the custom model's endpoint as before, so the pasted text
+  never comes from the stream. If the stream cannot start (for example, with no
+  xAI key) or fails, the paste is unaffected. The preview comes from xAI, not
+  the custom model, so its words can differ from the paste. The toggle is on for
+  a new mode and turns on when you pick a model in a mode's settings. A mode
+  saved with it on, including one saved before this change, starts streaming
+  once an xAI key is entered; a mode saved with it off keeps it off.
 - Text from a custom model is pasted without VoiceInk's output filter, which
   deletes filler words such as "mm" and "hm" and anything in brackets or
   parentheses, so "5 mm" and "(the old one)" survive. The filter's merging of
@@ -50,7 +52,8 @@ input changes on `main`, or when started by hand. It:
 
 `.github/workflows/upstream-check.yml` runs weekly and opens an issue when
 upstream has a newer stable release. Moving to it is a manual edit of
-`upstream.env`.
+`upstream.env`, after checking that `patches/live-preview.patch` still applies
+to the new commit and updating the patch if it does not.
 
 To build the same way on a Mac with Xcode and your own code-signing identity:
 
