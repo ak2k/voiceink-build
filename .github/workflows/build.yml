@@ -1,0 +1,368 @@
+name: build
+
+# Never add pull_request or pull_request_target: the signing key must not
+# meet code from a ref the owner has not pushed.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - upstream.env
+      - signing.env
+      - sign.xcconfig
+      - patches/**
+      - scripts/**
+      - .github/workflows/build.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: voiceink-build
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  SIGNING_IDENTITY: VoiceInk Local
+
+jobs:
+  build:
+    # A dispatch from another branch would still release and write to main.
+    if: github.ref == 'refs/heads/main'
+    # Upstream built v2.21 with Xcode 27.0 (27A266a), which this preview image
+    # carries. Fallback: runs-on: macos-26 with XCODE_VERSION=26.6 and
+    # XCODE_BUILD=17F113 in upstream.env (Swift 6.3, enough for v2.21's
+    # packages; untested with v2.21).
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load pins
+        run: |
+          # Only KEY=value lines reach GITHUB_ENV, so a stray line cannot set
+          # anything else for later steps.
+          for f in upstream.env signing.env; do
+            while IFS= read -r line || [ -n "$line" ]; do
+              case $line in '' | '#'*) continue ;; esac
+              if ! [[ $line =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9._-]+$ ]]; then
+                echo "::error file=$f::not a KEY=value line: $line"
+                exit 1
+              fi
+              printf '%s\n' "$line" >> "$GITHUB_ENV"
+            done < "$f"
+          done
+          cat upstream.env signing.env
+
+      - name: Select Xcode
+        run: |
+          for v in VOICEINK_TAG VOICEINK_REV WHISPER_TAG WHISPER_REV XCODE_VERSION XCODE_BUILD VOICEINK_CERT_SHA1; do
+            if [ -z "${!v:-}" ]; then echo "::error::$v is not set by upstream.env or signing.env"; exit 1; fi
+          done
+          dev="/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          if [ ! -d "$dev" ]; then
+            echo "::error::Xcode $XCODE_VERSION is not on this runner"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$dev" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$dev"
+          xcodebuild -version
+          swift --version
+          build=$(xcodebuild -version | awk '/^Build version/ { print $3 }')
+          if [ "$build" != "$XCODE_BUILD" ]; then
+            echo "::error::Xcode build is $build, upstream.env pins $XCODE_BUILD"
+            exit 1
+          fi
+
+      - name: Ensure the Metal toolchain
+        run: |
+          # Xcode 26+ ships the Metal compiler as a separate component that
+          # hosted images sometimes lack; mlx-swift compiles Metal shaders.
+          if ! xcrun metal --version; then
+            for attempt in 1 2 3; do
+              if xcodebuild -downloadComponent MetalToolchain; then break; fi
+              echo "download attempt $attempt failed"
+              sleep 15
+            done
+            xcrun metal --version
+          fi
+
+      - name: Check out VoiceInk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Beingpax/VoiceInk
+          ref: ${{ env.VOICEINK_REV }}
+          path: src
+          persist-credentials: false
+
+      - name: Verify pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(git -C src rev-parse HEAD)
+          if [ "$head" != "$VOICEINK_REV" ]; then
+            echo "::error::checked out $head, upstream.env pins $VOICEINK_REV"
+            exit 1
+          fi
+          # VOICEINK_REV may come after the tag commit (v2.21's version bump
+          # landed after its tag) but must contain it.
+          tag_rev=$(gh api "repos/Beingpax/VoiceInk/commits/$VOICEINK_TAG" --jq .sha)
+          status=$(gh api "repos/Beingpax/VoiceInk/compare/$tag_rev...$VOICEINK_REV" --jq .status)
+          case $status in
+            identical) ;;
+            ahead)
+              echo "$VOICEINK_REV is ahead of $VOICEINK_TAG ($tag_rev); files changed since the tag:"
+              gh api "repos/Beingpax/VoiceInk/compare/$tag_rev...$VOICEINK_REV" --jq '.files[].filename'
+              ;;
+            *)
+              echo "::error::$VOICEINK_REV does not contain $VOICEINK_TAG ($tag_rev); compare status: $status"
+              exit 1
+              ;;
+          esac
+          echo "VOICEINK_TAG_REV=$tag_rev" >> "$GITHUB_ENV"
+
+          remote=https://github.com/ggml-org/whisper.cpp.git
+          whisper_tag_rev=$(git ls-remote "$remote" "refs/tags/$WHISPER_TAG^{}" | cut -f1)
+          if [ -z "$whisper_tag_rev" ]; then
+            whisper_tag_rev=$(git ls-remote "$remote" "refs/tags/$WHISPER_TAG" | cut -f1)
+          fi
+          if [ "$whisper_tag_rev" != "$WHISPER_REV" ]; then
+            echo "::error::whisper.cpp $WHISPER_TAG is ${whisper_tag_rev:-missing}, upstream.env pins $WHISPER_REV"
+            exit 1
+          fi
+
+      # The project references the framework at this path, and `make local`
+      # skips its own unpinned whisper.cpp clone when the path exists.
+      - name: Restore whisper.xcframework
+        id: whisper-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/VoiceInk-Dependencies/whisper.cpp/build-apple/whisper.xcframework
+          key: whisper-${{ env.WHISPER_REV }}-xcode-${{ env.XCODE_BUILD }}
+
+      - name: Build whisper.xcframework
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        run: |
+          dir="$HOME/VoiceInk-Dependencies/whisper.cpp"
+          mkdir -p "$dir"
+          git -C "$dir" init -q
+          git -C "$dir" remote add origin https://github.com/ggml-org/whisper.cpp.git
+          git -C "$dir" fetch -q --depth 1 origin "$WHISPER_REV"
+          git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD
+          cd "$dir"
+          ./build-xcframework.sh
+          test -d build-apple/whisper.xcframework
+
+      # Saved right away so a later failure does not cost the next run a rebuild.
+      - name: Save whisper.xcframework
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/VoiceInk-Dependencies/whisper.cpp/build-apple/whisper.xcframework
+          key: whisper-${{ env.WHISPER_REV }}-xcode-${{ env.XCODE_BUILD }}
+
+      - name: Remove the update feed
+        run: patches/strip-sparkle.sh src
+
+      - name: Import the signing identity
+        env:
+          P12_BASE64: ${{ secrets.VOICEINK_SIGNING_P12 }}
+          P12_PASSWORD: ${{ secrets.VOICEINK_SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "$P12_BASE64" ] || [ -z "$P12_PASSWORD" ]; then
+            echo "::error::set the VOICEINK_SIGNING_P12 and VOICEINK_SIGNING_P12_PASSWORD secrets"
+            exit 1
+          fi
+          kc="$RUNNER_TEMP/voiceink.keychain-db"
+          p12="$RUNNER_TEMP/voiceink.p12"
+          pem="$RUNNER_TEMP/voiceink.pem"
+          kc_password=$(openssl rand -base64 32)
+          echo "::add-mask::$kc_password"
+
+          security create-keychain -p "$kc_password" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kc_password" "$kc"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$p12"
+          security import "$p12" -k "$kc" -f pkcs12 -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$p12"
+          # Lets codesign use the key without a SecurityAgent prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_password" "$kc" > /dev/null
+
+          security find-certificate -c "$SIGNING_IDENTITY" -p "$kc" > "$pem"
+          sha1=$(openssl x509 -in "$pem" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g' | tr 'a-f' 'A-F')
+          if [ "$sha1" != "$VOICEINK_CERT_SHA1" ]; then
+            echo "::error::the secret holds certificate $sha1; signing.env pins $VOICEINK_CERT_SHA1"
+            exit 1
+          fi
+          # Xcode offers only trusted identities.
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$kc" "$pem"
+
+          # codesign finds identities only in keychains on the search list.
+          keychains=("$kc")
+          while IFS= read -r k; do
+            k=${k#*\"}
+            keychains+=("${k%\"*}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${keychains[@]}"
+
+          security find-identity -v -p codesigning "$kc"
+          if ! security find-identity -v -p codesigning "$kc" | grep -q "\"$SIGNING_IDENTITY\""; then
+            echo "::error::\"$SIGNING_IDENTITY\" is not a valid code-signing identity in $kc"
+            exit 1
+          fi
+
+      - name: Build VoiceInk
+        working-directory: src
+        env:
+          XCODE_XCCONFIG_FILE: ${{ github.workspace }}/sign.xcconfig
+        run: make local LOCAL_CODESIGN_IDENTITY="$SIGNING_IDENTITY"
+
+      - name: Gate the signed app
+        run: scripts/verify-app.sh "$HOME/Downloads/VoiceInk.app" "${VOICEINK_TAG#v}" "$VOICEINK_CERT_SHA1"
+
+      - name: Package
+        id: pkg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${VOICEINK_TAG#v}
+          # Build iteration: one past the highest existing <tag>-r<N> release.
+          last=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName |
+            jq --arg p "$VOICEINK_TAG-r" '[.[].tagName | select(startswith($p)) | ltrimstr($p)
+              | select(test("^[0-9]+$")) | tonumber] | max // 0')
+          n=$((last + 1))
+          tag="$VOICEINK_TAG-r$n"
+          asset="VoiceInk-$version-r$n.tar.xz"
+          out="$RUNNER_TEMP/$asset"
+
+          # No AppleDouble files or extended attributes: the bundle's signature
+          # covers its files only, and Nix stores neither.
+          COPYFILE_DISABLE=1 /usr/bin/tar -C "$HOME/Downloads" --no-mac-metadata --no-xattrs \
+            -cJf "$out" VoiceInk.app
+          ls -l "$out"
+
+          # Check what a consumer will unpack, not only the build output.
+          rt="$RUNNER_TEMP/roundtrip"
+          mkdir -p "$rt"
+          /usr/bin/tar -C "$rt" -xJf "$out"
+          scripts/verify-app.sh "$rt/VoiceInk.app" "$version" "$VOICEINK_CERT_SHA1"
+
+          dr=$(codesign -d -r- "$rt/VoiceInk.app" 2>&1 | sed -n 's/^designated => //p')
+          sha256=$(shasum -a 256 "$out" | awk '{ print $1 }')
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$asset"
+          jq -n \
+            --arg release_tag "$tag" \
+            --arg version "$version" \
+            --arg asset "$asset" \
+            --arg url "$url" \
+            --arg sha256 "$sha256" \
+            --arg upstream_tag "$VOICEINK_TAG" \
+            --arg upstream_tag_rev "$VOICEINK_TAG_REV" \
+            --arg upstream_rev "$VOICEINK_REV" \
+            --arg whisper_tag "$WHISPER_TAG" \
+            --arg whisper_rev "$WHISPER_REV" \
+            --arg xcode_version "$XCODE_VERSION" \
+            --arg xcode_build "$XCODE_BUILD" \
+            --arg cert_sha1 "$VOICEINK_CERT_SHA1" \
+            --arg designated_requirement "$dr" \
+            --arg build_commit "$GITHUB_SHA" \
+            --arg build_run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '$ARGS.named' > "$RUNNER_TEMP/release.json"
+          cat "$RUNNER_TEMP/release.json"
+          {
+            echo "tag=$tag"
+            echo "path=$out"
+            echo "url=$url"
+            echo "sha256=$sha256"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pkg.outputs.tag }}
+          ASSET_PATH: ${{ steps.pkg.outputs.path }}
+          URL: ${{ steps.pkg.outputs.url }}
+          SHA256: ${{ steps.pkg.outputs.sha256 }}
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            echo "Unofficial build of VoiceInk ${VOICEINK_TAG#v} with update checks removed, signed with the"
+            echo "self-signed \"$SIGNING_IDENTITY\" certificate (SHA-1 $VOICEINK_CERT_SHA1) and not notarized."
+            echo "The official app is at https://github.com/Beingpax/VoiceInk."
+            echo
+            echo "Source:"
+            echo "- VoiceInk $VOICEINK_TAG: https://github.com/Beingpax/VoiceInk/tree/$VOICEINK_REV"
+            echo "- whisper.cpp $WHISPER_TAG: https://github.com/ggml-org/whisper.cpp/tree/$WHISPER_REV"
+            echo "- Build scripts: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$GITHUB_SHA"
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/release.json"
+            echo '```'
+          } > "$notes"
+          gh release create "$TAG" "$ASSET_PATH" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "VoiceInk ${VOICEINK_TAG#v} ($TAG)" --notes-file "$notes"
+
+          # Fetch the public URL the way Nix will, and compare bytes.
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL -o "$RUNNER_TEMP/download" "$URL"; then break; fi
+            echo "download attempt $attempt failed"
+            sleep 10
+          done
+          got=$(shasum -a 256 "$RUNNER_TEMP/download" | awk '{ print $1 }')
+          if [ "$got" != "$SHA256" ]; then
+            echo "::error::$URL has sha256 $got, expected $SHA256"
+            exit 1
+          fi
+
+      - name: Record dist/release.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pkg.outputs.tag }}
+        run: |
+          # The contents API writes one commit on main without a push credential
+          # in the workspace, where the upstream build could read it.
+          path=dist/release.json
+          if old_sha=$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=main" --jq .sha 2> "$RUNNER_TEMP/err"); then
+            :
+          elif grep -q 'HTTP 404' "$RUNNER_TEMP/err"; then
+            old_sha=""
+          else
+            cat "$RUNNER_TEMP/err" >&2
+            exit 1
+          fi
+          jq -n \
+            --arg message "Record release $TAG" \
+            --arg content "$(base64 < "$RUNNER_TEMP/release.json" | tr -d '\n')" \
+            --arg sha "$old_sha" \
+            '{message: $message, content: $content, branch: "main"} + (if $sha == "" then {} else {sha: $sha} end)' \
+            > "$RUNNER_TEMP/put.json"
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/$path" --input "$RUNNER_TEMP/put.json" --jq .commit.html_url
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.pkg.outputs.tag }}
+          URL: ${{ steps.pkg.outputs.url }}
+          SHA256: ${{ steps.pkg.outputs.sha256 }}
+        run: |
+          {
+            echo "### VoiceInk ${VOICEINK_TAG#v} released as $TAG"
+            echo
+            echo "- Asset: $URL"
+            echo "- sha256: \`$SHA256\`"
+            echo "- Upstream: \`$VOICEINK_REV\` ($VOICEINK_TAG), whisper.cpp \`$WHISPER_REV\` ($WHISPER_TAG)"
+            echo "- Xcode $XCODE_VERSION ($XCODE_BUILD), certificate SHA-1 \`$VOICEINK_CERT_SHA1\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete the signing keychain
+        if: always()
+        run: |
+          kc="$RUNNER_TEMP/voiceink.keychain-db"
+          if [ -e "$kc" ]; then security delete-keychain "$kc"; fi
+          rm -f "$RUNNER_TEMP/voiceink.p12"

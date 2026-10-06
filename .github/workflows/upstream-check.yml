@@ -1,0 +1,72 @@
+name: upstream-check
+
+# Opens an issue (not a pull request, which would need a repository setting)
+# when Beingpax/VoiceInk has a stable release newer than upstream.env's pin.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare with upstream's newest stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(sed -n 's/^VOICEINK_TAG=//p' upstream.env)
+          if ! [[ $current =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "::error file=upstream.env::VOICEINK_TAG is '$current', expected vX.Y or vX.Y.Z"
+            exit 1
+          fi
+
+          # Stable means published, not flagged prerelease, and a plain vX.Y[.Z]
+          # tag: upstream published v1.66-beta without the prerelease flag.
+          gh api --paginate "repos/Beingpax/VoiceInk/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' > releases.txt
+          latest=$(grep -E '^v[0-9]+(\.[0-9]+)+$' releases.txt | sort -V | tail -n 1)
+          newest=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)
+          echo "pinned $current; upstream's newest stable release is $latest"
+          if [ "$latest" = "$current" ] || [ "$newest" = "$current" ]; then
+            exit 0
+          fi
+
+          title="Upstream VoiceInk $latest is available"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json title |
+            jq --arg t "$title" '[.[] | select(.title == $t)] | length')
+          if [ "$open" -gt 0 ]; then
+            echo "an open issue already tracks $latest"
+            exit 0
+          fi
+
+          rev=$(gh api "repos/Beingpax/VoiceInk/commits/$latest" --jq .sha)
+          {
+            echo "Beingpax/VoiceInk published $latest at commit \`$rev\`. This repository builds $current."
+            echo
+            echo "To update, edit \`upstream.env\` and push to main:"
+            echo
+            echo "1. Set \`VOICEINK_TAG=$latest\` and \`VOICEINK_REV\` to a commit that contains the tag."
+            echo "   Use \`$rev\` if \`MARKETING_VERSION\` in \`VoiceInk.xcodeproj/project.pbxproj\` there"
+            echo "   is already ${latest#v}; otherwise use upstream's later version-bump commit."
+            echo "2. Check whether \`XCODE_VERSION\`, \`XCODE_BUILD\` or the whisper.cpp pin should move"
+            echo "   (the \`DTXcodeBuild\` key in the official app's Info.plist names upstream's Xcode)."
+            echo
+            echo "Release: https://github.com/Beingpax/VoiceInk/releases/tag/$latest"
+            echo "Changes: https://github.com/Beingpax/VoiceInk/compare/$current...$latest"
+          } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md
