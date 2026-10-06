@@ -25,7 +25,8 @@ The official app, with automatic updates, is available from
   keeps it off.
 - Text from a custom model is pasted without VoiceInk's output filter, which
   deletes filler words such as "mm" and "hm" and anything in brackets or
-  parentheses, so "5 mm" and "(the old one)" survive.
+  parentheses, so "5 mm" and "(the old one)" survive. The filter's merging of
+  repeated spaces is skipped too; the text is still trimmed at both ends.
 - It is signed with a self-signed certificate, "VoiceInk Local", instead of an
   Apple Developer ID, and it is not notarized. The workflow signs with that one
   certificate each time, and macOS ties permissions such as Microphone and Accessibility
@@ -39,8 +40,8 @@ input changes on `main`, or when started by hand. It:
 
 1. checks out VoiceInk and whisper.cpp at the commits pinned in `upstream.env`,
    and uses the Xcode version pinned there;
-2. removes the update feed and applies `patches/live-preview.patch`, failing if
-   the patch no longer applies;
+2. applies `patches/live-preview.patch`, failing if the patch no longer
+   applies, and removes the update feed;
 3. runs `make local`, signing with the certificate held in a repository secret;
 4. checks the signature, the designated requirement, the entitlements, the
    version, and that the update feed is gone (`scripts/verify-app.sh`);
@@ -56,8 +57,8 @@ To build the same way on a Mac with Xcode and your own code-signing identity:
 ```sh
 git clone https://github.com/Beingpax/VoiceInk.git && cd VoiceInk
 git checkout <VOICEINK_REV from upstream.env>
-/path/to/voiceink-build/patches/strip-sparkle.sh .
 git apply /path/to/voiceink-build/patches/live-preview.patch
+/path/to/voiceink-build/patches/strip-sparkle.sh .
 XCODE_XCCONFIG_FILE=/path/to/voiceink-build/sign.xcconfig \
   make local LOCAL_CODESIGN_IDENTITY="VoiceInk Local"
 ```

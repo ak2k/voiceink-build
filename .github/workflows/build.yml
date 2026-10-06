@@ -168,16 +168,17 @@ jobs:
           path: ~/VoiceInk-Dependencies/whisper.cpp/build-apple/whisper.xcframework
           key: whisper-${{ env.WHISPER_REV }}-xcode-${{ env.XCODE_BUILD }}
 
-      - name: Remove the update feed
-        run: patches/strip-sparkle.sh src
-
       # --check first so a patch that no longer applies after an upstream bump
-      # fails here, before anything in src changes.
+      # fails here, before anything in src changes. It runs before the update
+      # feed is removed so that step's source scan covers the patched files.
       - name: Apply the live-preview patch
         run: |
           patch="$GITHUB_WORKSPACE/patches/live-preview.patch"
           git -C src apply --check "$patch"
           git -C src apply "$patch"
+
+      - name: Remove the update feed
+        run: patches/strip-sparkle.sh src
 
       - name: Import the signing identity
         env:
