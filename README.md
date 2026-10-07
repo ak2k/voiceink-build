@@ -28,9 +28,10 @@ The official app, with automatic updates, is available from
 - Text from a custom model is pasted without VoiceInk's output filter, which
   deletes filler words such as "mm" and "hm" and anything in brackets or
   parentheses, so "5 mm" and "(the old one)" survive. The filter's merging of
-  repeated spaces is skipped too; the text is still trimmed at both ends. A
-  mode's trigger word is still found after a filler word or bracketed text; in
-  that case the text that follows it is filtered.
+  repeated spaces is skipped too; the text is still trimmed at both ends. When a
+  mode's trigger word is used, the mode is chosen and the text is filtered as in
+  the official app; without a trigger word, the custom model's text is pasted
+  unfiltered.
 - It is signed with a self-signed certificate, "VoiceInk Local", instead of an
   Apple Developer ID, and it is not notarized. The workflow signs with that one
   certificate each time, and macOS ties permissions such as Microphone and Accessibility

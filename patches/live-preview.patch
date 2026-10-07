@@ -53,7 +53,7 @@ index 2351c0a..02212a8 100644
              let streamingProvider = cloudProvider.makeStreamingProvider(modelContext: modelContext)
          else {
 diff --git a/VoiceInk/Features/Recording/Workflows/TranscriptionPipeline.swift b/VoiceInk/Features/Recording/Workflows/TranscriptionPipeline.swift
-index 9729654..765aad3 100644
+index 9729654..4a48a9e 100644
 --- a/VoiceInk/Features/Recording/Workflows/TranscriptionPipeline.swift
 +++ b/VoiceInk/Features/Recording/Workflows/TranscriptionPipeline.swift
 @@ -111,7 +111,7 @@ class TranscriptionPipeline {
@@ -65,16 +65,16 @@ index 9729654..765aad3 100644
              let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
  
              if shouldCancel() {
-@@ -121,8 +121,12 @@ class TranscriptionPipeline {
+@@ -121,8 +121,11 @@ class TranscriptionPipeline {
  
              text = text.trimmingCharacters(in: .whitespacesAndNewlines)
  
-+            // Custom-model text skips the filter, so a trigger word behind a filler or a bracket
-+            // is matched on the filtered copy too.
++            // Custom-model text skipped the filter above; trigger words are matched on the filtered
++            // copy so mode selection is the same as for filtered text.
              if !assistant.isFollowUp,
-                 let processedText = triggerWordModeSelection(text)
-+                    ?? (model.provider == .custom
-+                        ? triggerWordModeSelection(TranscriptionOutputFilter.filter(text)) : nil)
+-                let processedText = triggerWordModeSelection(text)
++                let processedText = triggerWordModeSelection(
++                    model.provider == .custom ? TranscriptionOutputFilter.filter(text) : text)
              {
                  text = processedText
              }
