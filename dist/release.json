@@ -1,9 +1,9 @@
 {
-  "release_tag": "v2.21-r1",
+  "release_tag": "v2.21-r2",
   "version": "2.21",
-  "asset": "VoiceInk-2.21-r1.tar.xz",
-  "url": "https://github.com/ak2k/voiceink-build/releases/download/v2.21-r1/VoiceInk-2.21-r1.tar.xz",
-  "sha256": "0c85c3b95b4ed3cc422508ebda5839d61de2ab3b43e915bddbb7cf87f4ef2951",
+  "asset": "VoiceInk-2.21-r2.tar.xz",
+  "url": "https://github.com/ak2k/voiceink-build/releases/download/v2.21-r2/VoiceInk-2.21-r2.tar.xz",
+  "sha256": "da831bfaaec8ac2006b77a740d47be39081fc2613659ac15d60ac9f38428da34",
   "upstream_tag": "v2.21",
   "upstream_tag_rev": "640b0c8c36ee74d9e76d930f40e2c04bb739b4b3",
   "upstream_rev": "6fdf011c991f3517023c7883ddc4ee37c6de6109",
@@ -13,6 +13,6 @@
   "xcode_build": "27A266a",
   "cert_sha1": "528AC9B2C6A87219146B0A001E246C5340905453",
   "designated_requirement": "identifier \"com.prakashjoshipax.VoiceInk\" and certificate leaf = H\"528ac9b2c6a87219146b0a001e246c5340905453\"",
-  "build_commit": "bca287c3e8214c3e35248840440b220fc6ce9e57",
-  "build_run": "https://github.com/ak2k/voiceink-build/actions/runs/37471876031"
+  "build_commit": "c227e212d3819adc139385a219d5e6c68250ce18",
+  "build_run": "https://github.com/ak2k/voiceink-build/actions/runs/37566676001"
 }
