@@ -19,8 +19,8 @@ The official app, with automatic updates, is available from
   xAI API key is entered in VoiceInk's settings, the recorded audio is also
   streamed to xAI under that key. When you stop, the stream is dropped and the
   recording is sent to the custom model's endpoint as before, so the pasted text
-  never comes from the stream. If the stream cannot start (for example, with no
-  xAI key) or fails, the paste is unaffected. The preview comes from xAI, not
+  never comes from the stream. If the stream fails or cannot start, as when no
+  xAI key is set, the paste is unaffected. The preview comes from xAI, not
   the custom model, so its words can differ from the paste. The toggle is on for
   a new mode and turns on when you pick a model in a mode's settings. A mode
   saved with it on, including one saved before this change, starts streaming
